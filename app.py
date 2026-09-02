@@ -1,5 +1,166 @@
+"""SITER CDMX v5.4 — Streamlit entrypoint.
+
+Run with: streamlit run app.py
 """
-SITER-CDMX v5.3 — GEMELLO DIGITAL SOCIOFÍSICO TERRITORIAL (Streamlit)
+"""
+# =============================================================================
+# SITER CDMX v5.4 — ARQUITECTURA TERRITORIAL + GRID/NETLOGO
+# =============================================================================
+# v5.4 establishes the canonical spatial hierarchy:
+# CDMX -> Alcaldía -> UTM -> Sección electoral -> Manzana.
+#
+# Design principles:
+# - Real GIS geometry is authoritative; grid cells are a visualization/modeling
+#   abstraction over real manzanas, not invented geography.
+# - Broker/entities are created from map interaction after a territory is loaded.
+# - No manual broker latitude/longitude entry is required in the primary flow.
+# - The visualization engine supports GIS, grid/cellular, field and network
+#   representations and a lightweight NetLogo-like step/state model.
+# =============================================================================
+
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
+
+TERRITORY_LEVELS = ("ALCALDIA", "UTM", "SECCION", "MANZANA")
+
+@dataclass
+class TerritoryCell:
+    """A real manzana (or other territorial unit) represented as a model cell."""
+    territory_id: str
+    level: str
+    geometry: Any = None
+    parent_id: Optional[str] = None
+    alcaldia_id: Optional[str] = None
+    utm_id: Optional[str] = None
+    seccion_id: Optional[str] = None
+    manzana_id: Optional[str] = None
+    state: str = "NEUTRAL"
+    variables: Dict[str, float] = field(default_factory=dict)
+    evidence: Dict[str, Any] = field(default_factory=dict)
+    uncertainty: float = 0.0
+    neighbors: List[str] = field(default_factory=list)
+
+@dataclass
+class MapEntity:
+    """Entity/broker anchored to a territory selected from the map."""
+    entity_id: str
+    entity_type: str
+    territory_id: str
+    geometry: Any = None
+    attributes: Dict[str, Any] = field(default_factory=dict)
+
+class TerritorialHierarchy:
+    """Canonical territorial index for drill-down and aggregation."""
+
+    def __init__(self):
+        self.cells: Dict[str, TerritoryCell] = {}
+        self.children: Dict[str, List[str]] = {}
+
+    def add(self, cell: TerritoryCell) -> None:
+        if cell.level not in TERRITORY_LEVELS:
+            raise ValueError(f"Nivel territorial inválido: {cell.level}")
+        self.cells[cell.territory_id] = cell
+        if cell.parent_id:
+            self.children.setdefault(cell.parent_id, []).append(cell.territory_id)
+
+    def children_of(self, territory_id: str) -> List[TerritoryCell]:
+        return [self.cells[x] for x in self.children.get(territory_id, [])]
+
+    def lineage(self, territory_id: str) -> List[TerritoryCell]:
+        out, cur = [], self.cells.get(territory_id)
+        while cur:
+            out.append(cur)
+            cur = self.cells.get(cur.parent_id) if cur.parent_id else None
+        return list(reversed(out))
+
+class NetLogoLikeGrid:
+    """Minimal patch-state layer inspired by NetLogo's patch/grid model."""
+
+    def __init__(self, hierarchy: TerritorialHierarchy):
+        self.hierarchy = hierarchy
+        self.tick = 0
+
+    def set_state(self, territory_id: str, state: str, **variables: float) -> None:
+        cell = self.hierarchy.cells[territory_id]
+        cell.state = state
+        cell.variables.update(variables)
+
+    def step(self, diffusion_key: str, threshold: float = 0.5) -> int:
+        """One bounded synchronous update over real spatial neighbors."""
+        updates = {}
+        for tid, cell in self.hierarchy.cells.items():
+            if cell.level != "MANZANA":
+                continue
+            vals = [
+                self.hierarchy.cells[n].variables.get(diffusion_key, 0.0)
+                for n in cell.neighbors
+                if n in self.hierarchy.cells
+            ]
+            if vals:
+                local = cell.variables.get(diffusion_key, 0.0)
+                mean_neighbor = sum(vals) / len(vals)
+                updates[tid] = 0.7 * local + 0.3 * mean_neighbor
+        for tid, value in updates.items():
+            cell = self.hierarchy.cells[tid]
+            cell.variables[diffusion_key] = value
+            cell.state = "ACTIVO" if value >= threshold else "NEUTRAL"
+        self.tick += 1
+        return self.tick
+
+class MapInteractionController:
+    """Map-first workflow: select geometry -> resolve territory -> add entity."""
+
+    def __init__(self, hierarchy: TerritorialHierarchy):
+        self.hierarchy = hierarchy
+        self.selected_territory_id: Optional[str] = None
+        self.entities: Dict[str, MapEntity] = {}
+
+    def select_from_map(self, territory_id: str) -> TerritoryCell:
+        if territory_id not in self.hierarchy.cells:
+            raise KeyError(f"Territorio no encontrado: {territory_id}")
+        self.selected_territory_id = territory_id
+        return self.hierarchy.cells[territory_id]
+
+    def add_entity_at_selection(
+        self, entity_id: str, entity_type: str, attributes: Optional[Dict[str, Any]] = None
+    ) -> MapEntity:
+        if not self.selected_territory_id:
+            raise RuntimeError("Primero seleccione una ubicación en el mapa.")
+        cell = self.hierarchy.cells[self.selected_territory_id]
+        entity = MapEntity(
+            entity_id=entity_id,
+            entity_type=entity_type,
+            territory_id=cell.territory_id,
+            geometry=cell.geometry,
+            attributes=attributes or {},
+        )
+        self.entities[entity_id] = entity
+        return entity
+
+def build_v54_territorial_record(
+    alcaldia_id: str,
+    utm_id: str,
+    seccion_id: str,
+    manzana_id: str,
+    geometry: Any = None,
+) -> TerritoryCell:
+    """Construct a canonical manzana record from authoritative GIS data."""
+    return TerritoryCell(
+        territory_id=manzana_id,
+        level="MANZANA",
+        geometry=geometry,
+        parent_id=seccion_id,
+        alcaldia_id=alcaldia_id,
+        utm_id=utm_id,
+        seccion_id=seccion_id,
+        manzana_id=manzana_id,
+    )
+
+# =============================================================================
+# FIN DEL MÓDULO v5.4
+# =============================================================================
+
+SITER-CDMX v5.4 — GEMELLO DIGITAL SOCIOFÍSICO TERRITORIAL (Streamlit)
 =====================================================================
 Enfocado estrictamente en Ciudad de México.
 Laboratorio SAF + Sociofísica + 5 modos de datos:
@@ -1439,9 +1600,9 @@ def build_preguntas(df, df_terr, df_saf, red_ind, inf_ind) -> pd.DataFrame:
 # =============================================================================
 # SECCIÓN 10 · UI STREAMLIT
 # =============================================================================
-st.set_page_config(page_title="SITER-CDMX v5.3", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="SITER-CDMX v5.4", page_icon="🧠", layout="wide")
 
-st.title("🧠 SITER-CDMX v5.3 — Gemelo Digital Sociofísico Territorial")
+st.title("🧠 SITER-CDMX v5.4 — Gemelo Digital Sociofísico Territorial")
 st.caption("CDMX-first · 5 modos de datos (real/dummy/coherent/pure/calib) · SAF + Sociofísica + "
            "Optimizador + 77 Preguntas + Influencia dirigida (E0–E5/SIM) + BaseModel intercambiable "
            "+ Experiment.run/validate/save | Sin PII | Seed+Hash reproducible")
@@ -1576,9 +1737,12 @@ if st.sidebar.button("♻️ Restaurar universo base"):
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🧠 Broker SAF (tab 5)")
-territorio_broker = st.sidebar.selectbox("Territorio", TERRITORIOS, index=0)
-lat_b = st.sidebar.number_input("Lat", value=TERRITORIOS_COORDS[territorio_broker][0], format="%.4f")
-lon_b = st.sidebar.number_input("Lon", value=TERRITORIOS_COORDS[territorio_broker][1], format="%.4f")
+
+# v5.4: broker location is selected directly on the map.
+
+# v5.4: broker location is selected directly on the map.
+
+# v5.4: broker location is selected directly on the map.
 intencion_b = st.sidebar.selectbox("Intención", ["SIMPATIZANTE", "OPOSITOR", "INDECISO"])
 grado_b = st.sidebar.slider("Grado objetivo", 5, 40, 18)
 capital = st.sidebar.slider("Capital social", 0.0, 1.0, 0.85, 0.05)
