@@ -1,0 +1,18 @@
+# SITER-CDMX v5.3 — Dependencias
+# Instalar con: pip install -r requirements.txt
+
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.18.0
+pydeck>=0.8.0
+pyyaml>=6.0
+
+# Opcional (recomendado para modo real con SHP)
+geopandas>=0.14.0
+shapely>=2.0.0
+fiona>=1.9.0
+pyproj>=3.6.0
+
+# Opcional para desarrollo / tests
+# pytest>=7.4.0
