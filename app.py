@@ -1,165 +1,4 @@
-"""SITER CDMX v5.4 — Streamlit entrypoint.
-
-Run with: streamlit run app.py
 """
-"""
-# =============================================================================
-# SITER CDMX v5.4 — ARQUITECTURA TERRITORIAL + GRID/NETLOGO
-# =============================================================================
-# v5.4 establishes the canonical spatial hierarchy:
-# CDMX -> Alcaldía -> UTM -> Sección electoral -> Manzana.
-#
-# Design principles:
-# - Real GIS geometry is authoritative; grid cells are a visualization/modeling
-#   abstraction over real manzanas, not invented geography.
-# - Broker/entities are created from map interaction after a territory is loaded.
-# - No manual broker latitude/longitude entry is required in the primary flow.
-# - The visualization engine supports GIS, grid/cellular, field and network
-#   representations and a lightweight NetLogo-like step/state model.
-# =============================================================================
-
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
-
-TERRITORY_LEVELS = ("ALCALDIA", "UTM", "SECCION", "MANZANA")
-
-@dataclass
-class TerritoryCell:
-    """A real manzana (or other territorial unit) represented as a model cell."""
-    territory_id: str
-    level: str
-    geometry: Any = None
-    parent_id: Optional[str] = None
-    alcaldia_id: Optional[str] = None
-    utm_id: Optional[str] = None
-    seccion_id: Optional[str] = None
-    manzana_id: Optional[str] = None
-    state: str = "NEUTRAL"
-    variables: Dict[str, float] = field(default_factory=dict)
-    evidence: Dict[str, Any] = field(default_factory=dict)
-    uncertainty: float = 0.0
-    neighbors: List[str] = field(default_factory=list)
-
-@dataclass
-class MapEntity:
-    """Entity/broker anchored to a territory selected from the map."""
-    entity_id: str
-    entity_type: str
-    territory_id: str
-    geometry: Any = None
-    attributes: Dict[str, Any] = field(default_factory=dict)
-
-class TerritorialHierarchy:
-    """Canonical territorial index for drill-down and aggregation."""
-
-    def __init__(self):
-        self.cells: Dict[str, TerritoryCell] = {}
-        self.children: Dict[str, List[str]] = {}
-
-    def add(self, cell: TerritoryCell) -> None:
-        if cell.level not in TERRITORY_LEVELS:
-            raise ValueError(f"Nivel territorial inválido: {cell.level}")
-        self.cells[cell.territory_id] = cell
-        if cell.parent_id:
-            self.children.setdefault(cell.parent_id, []).append(cell.territory_id)
-
-    def children_of(self, territory_id: str) -> List[TerritoryCell]:
-        return [self.cells[x] for x in self.children.get(territory_id, [])]
-
-    def lineage(self, territory_id: str) -> List[TerritoryCell]:
-        out, cur = [], self.cells.get(territory_id)
-        while cur:
-            out.append(cur)
-            cur = self.cells.get(cur.parent_id) if cur.parent_id else None
-        return list(reversed(out))
-
-class NetLogoLikeGrid:
-    """Minimal patch-state layer inspired by NetLogo's patch/grid model."""
-
-    def __init__(self, hierarchy: TerritorialHierarchy):
-        self.hierarchy = hierarchy
-        self.tick = 0
-
-    def set_state(self, territory_id: str, state: str, **variables: float) -> None:
-        cell = self.hierarchy.cells[territory_id]
-        cell.state = state
-        cell.variables.update(variables)
-
-    def step(self, diffusion_key: str, threshold: float = 0.5) -> int:
-        """One bounded synchronous update over real spatial neighbors."""
-        updates = {}
-        for tid, cell in self.hierarchy.cells.items():
-            if cell.level != "MANZANA":
-                continue
-            vals = [
-                self.hierarchy.cells[n].variables.get(diffusion_key, 0.0)
-                for n in cell.neighbors
-                if n in self.hierarchy.cells
-            ]
-            if vals:
-                local = cell.variables.get(diffusion_key, 0.0)
-                mean_neighbor = sum(vals) / len(vals)
-                updates[tid] = 0.7 * local + 0.3 * mean_neighbor
-        for tid, value in updates.items():
-            cell = self.hierarchy.cells[tid]
-            cell.variables[diffusion_key] = value
-            cell.state = "ACTIVO" if value >= threshold else "NEUTRAL"
-        self.tick += 1
-        return self.tick
-
-class MapInteractionController:
-    """Map-first workflow: select geometry -> resolve territory -> add entity."""
-
-    def __init__(self, hierarchy: TerritorialHierarchy):
-        self.hierarchy = hierarchy
-        self.selected_territory_id: Optional[str] = None
-        self.entities: Dict[str, MapEntity] = {}
-
-    def select_from_map(self, territory_id: str) -> TerritoryCell:
-        if territory_id not in self.hierarchy.cells:
-            raise KeyError(f"Territorio no encontrado: {territory_id}")
-        self.selected_territory_id = territory_id
-        return self.hierarchy.cells[territory_id]
-
-    def add_entity_at_selection(
-        self, entity_id: str, entity_type: str, attributes: Optional[Dict[str, Any]] = None
-    ) -> MapEntity:
-        if not self.selected_territory_id:
-            raise RuntimeError("Primero seleccione una ubicación en el mapa.")
-        cell = self.hierarchy.cells[self.selected_territory_id]
-        entity = MapEntity(
-            entity_id=entity_id,
-            entity_type=entity_type,
-            territory_id=cell.territory_id,
-            geometry=cell.geometry,
-            attributes=attributes or {},
-        )
-        self.entities[entity_id] = entity
-        return entity
-
-def build_v54_territorial_record(
-    alcaldia_id: str,
-    utm_id: str,
-    seccion_id: str,
-    manzana_id: str,
-    geometry: Any = None,
-) -> TerritoryCell:
-    """Construct a canonical manzana record from authoritative GIS data."""
-    return TerritoryCell(
-        territory_id=manzana_id,
-        level="MANZANA",
-        geometry=geometry,
-        parent_id=seccion_id,
-        alcaldia_id=alcaldia_id,
-        utm_id=utm_id,
-        seccion_id=seccion_id,
-        manzana_id=manzana_id,
-    )
-
-# =============================================================================
-# FIN DEL MÓDULO v5.4
-# =============================================================================
-
 SITER-CDMX v5.4 — GEMELLO DIGITAL SOCIOFÍSICO TERRITORIAL (Streamlit)
 =====================================================================
 Enfocado estrictamente en Ciudad de México.
@@ -173,7 +12,7 @@ Laboratorio SAF + Sociofísica + 5 modos de datos:
 Ejecutar:
     pip install streamlit pandas numpy pydeck plotly pyyaml
     (opcional para SHP: pip install geopandas)
-    streamlit run app_siter_cdmx_v53.py
+    streamlit run app.py
 
 MAPA DE MIGRACIÓN AL PAQUETE v3.0 (cada sección → módulo futuro):
     SECCIÓN 0  CONFIG                → configs/*.yaml
@@ -269,14 +108,13 @@ def dump_config(cfg: dict) -> str:
 # =============================================================================
 # SECCIÓN 1 · CORE
 # =============================================================================
-TERRITORIOS = ["CENTRO", "NORTE", "SUR", "PUEBLA", "EDOMEX", "VERACRUZ"]
-TERRITORIOS_COORDS = {
-    "CENTRO": (19.4326, -99.1332), "NORTE": (19.5000, -99.1100),
-    "SUR": (19.3000, -99.1700), "PUEBLA": (19.0414, -98.2063),
-    "EDOMEX": (19.3569, -99.6557), "VERACRUZ": (19.1738, -96.1342),
-}
-EDGES_TERR = [("CENTRO", "NORTE", 0.8), ("CENTRO", "SUR", 0.7), ("NORTE", "EDOMEX", 0.6),
-              ("SUR", "PUEBLA", 0.4), ("CENTRO", "PUEBLA", 0.3)]
+# =============================================================================
+# SECCIÓN 1 · CORE TERRITORIAL CDMX — ÚNICAMENTE CIUDAD DE MÉXICO
+# =============================================================================
+# Jerarquía oficial de análisis: CDMX → Alcaldía → UTM → Sección → Manzana.
+# No existen Puebla, Estado de México, Veracruz ni territorios ficticios en el
+# universo SITER CDMX. Las relaciones inter-alcaldía se derivan exclusivamente
+# de la contigüidad declarada en CONTIGUIDAD_ALCALDIAS.
 
 COLOR_INTENCION = {"SIMPATIZANTE": [46, 204, 113, 200], "OPOSITOR": [231, 76, 60, 200],
                    "INDECISO": [149, 165, 166, 180]}
@@ -337,6 +175,23 @@ CONTIGUIDAD_ALCALDIAS = {
     "CUAJIMALPA DE MORELOS": ["ALVARO OBREGON", "LA MAGDALENA CONTRERAS"],
     "LA MAGDALENA CONTRERAS": ["ALVARO OBREGON", "TLALPAN", "CUAJIMALPA DE MORELOS"],
 }
+
+# Universo territorial: SOLO las 16 alcaldías de la CDMX.
+TERRITORIOS = list(ALCALDIAS_CDMX)
+TERRITORIOS_COORDS = dict(ALCALDIA_COORDS)
+EDGES_TERR = []
+_seen_edges = set()
+for _a, _vecinos in CONTIGUIDAD_ALCALDIAS.items():
+    for _b in _vecinos:
+        _key = tuple(sorted((_a, _b)))
+        if _key not in _seen_edges:
+            _seen_edges.add(_key)
+            EDGES_TERR.append((_a, _b, 1.0))
+del _a, _b, _vecinos, _key, _seen_edges
+
+# Niveles espaciales admitidos por el motor. Una fila puede representar el
+# nivel más fino disponible; nunca se inventa una geometría real ausente.
+NIVELES_TERRITORIALES = ["ALCALDIA", "UTM", "SECCION", "MANZANA"]
 
 
 class DataProvider:
@@ -422,6 +277,13 @@ class DataProvider:
             df = df.merge(seg, on="seccion", how="left", suffixes=("", "_q"))
 
         df = self._fill_required_columns(df)
+        # Jerarquía territorial: conservar todos los niveles que vengan en los datos.
+        # No se fabrican UTM/manzanas en modo real.
+        if "alcaldia" in df.columns:
+            df["alcaldia"] = df["alcaldia"].astype(str).str.upper().str.strip()
+        for _c in ["utm", "seccion", "manzana"]:
+            if _c in df.columns:
+                df[_c] = df[_c].astype(str).str.strip()
         adj = self._build_adj_from_alcaldias(df, p_intra=p_intra, p_inter=p_inter)
         df["grado"] = df.index.map(lambda i: len(adj.get(i, [])))
         max_g = max(int(df["grado"].max() or 1), 1)
@@ -496,7 +358,9 @@ class DataProvider:
 
     def _load_synth_pure(self, n: int = 400, p_intra: float = 0.05, p_inter: float = 0.01):
         df, adj = Lab.generate(n=n, seed=self.seed, p_intra=p_intra, p_inter=p_inter, cfg=self.cfg)
-        df["alcaldia"] = df["territorial_unit_id"]
+        df["alcaldia"] = df["territorial_unit_id"].astype(str)
+        # El sintético puro trabaja a nivel alcaldía; UTM/sección/manzana solo
+        # se agregan cuando existen en una fuente territorial real.
         meta = {"mode": "synth_pure", "source_hash": sha256(f"pure-{n}-{self.seed}"),
                 "n_nodes": len(df), "timestamp": pd.Timestamp.now().isoformat(),
                 "notes": "Universo sintético puro (generador original)"}
@@ -698,12 +562,23 @@ class Calibrador:
     """Importa CSV públicos agregados (ENSU/INE-like) y recalibra distribuciones por territorio."""
 
     TEMPLATE_COMBINADO = """territorio,simpat_pct,opos_pct,indec_pct,conflicto_pct,inseguridad_pct,desconfianza_proxy,movilizacion_proxy
-CENTRO,0.42,0.33,0.25,0.48,0.52,0.38,0.55
-NORTE,0.28,0.47,0.25,0.65,0.68,0.55,0.42
-SUR,0.38,0.30,0.32,0.41,0.45,0.32,0.68
-PUEBLA,0.51,0.28,0.21,0.35,0.40,0.28,0.60
-EDOMEX,0.35,0.40,0.25,0.58,0.72,0.50,0.48
-VERACRUZ,0.45,0.30,0.25,0.30,0.35,0.25,0.50"""
+ALVARO OBREGON,0.380,0.328,0.260,0.450,0.510,0.380,0.550
+AZCAPOTZALCO,0.390,0.336,0.260,0.460,0.520,0.390,0.560
+BENITO JUAREZ,0.400,0.344,0.260,0.470,0.530,0.400,0.570
+COYOACAN,0.410,0.352,0.260,0.450,0.500,0.410,0.550
+CUAJIMALPA DE MORELOS,0.420,0.328,0.260,0.460,0.510,0.420,0.560
+CUAUHTEMOC,0.380,0.336,0.260,0.470,0.520,0.380,0.570
+GUSTAVO A MADERO,0.390,0.344,0.260,0.450,0.530,0.390,0.550
+IZTACALCO,0.400,0.352,0.260,0.460,0.500,0.400,0.560
+IZTAPALAPA,0.410,0.328,0.260,0.470,0.510,0.410,0.570
+LA MAGDALENA CONTRERAS,0.420,0.336,0.260,0.450,0.520,0.420,0.550
+MIGUEL HIDALGO,0.380,0.344,0.260,0.460,0.530,0.380,0.560
+MILPA ALTA,0.390,0.352,0.260,0.470,0.500,0.390,0.570
+TLAHUAC,0.400,0.328,0.260,0.450,0.510,0.400,0.550
+TLALPAN,0.410,0.336,0.260,0.460,0.520,0.410,0.560
+VENUSTIANO CARRANZA,0.420,0.344,0.260,0.470,0.530,0.420,0.570
+XOCHIMILCO,0.380,0.352,0.260,0.450,0.500,0.380,0.550
+"""
 
     @staticmethod
     def parse_csv(uploaded_file_or_text) -> pd.DataFrame:
@@ -1600,9 +1475,9 @@ def build_preguntas(df, df_terr, df_saf, red_ind, inf_ind) -> pd.DataFrame:
 # =============================================================================
 # SECCIÓN 10 · UI STREAMLIT
 # =============================================================================
-st.set_page_config(page_title="SITER-CDMX v5.4", page_icon="🧠", layout="wide")
+st.set_page_config(page_title="SITER-CDMX v5.3", page_icon="🧠", layout="wide")
 
-st.title("🧠 SITER-CDMX v5.4 — Gemelo Digital Sociofísico Territorial")
+st.title("🧠 SITER-CDMX v5.3 — Gemelo Digital Sociofísico Territorial")
 st.caption("CDMX-first · 5 modos de datos (real/dummy/coherent/pure/calib) · SAF + Sociofísica + "
            "Optimizador + 77 Preguntas + Influencia dirigida (E0–E5/SIM) + BaseModel intercambiable "
            "+ Experiment.run/validate/save | Sin PII | Seed+Hash reproducible")
@@ -1619,6 +1494,7 @@ S = st.session_state.s5
 
 # ----- SIDEBAR -----
 st.sidebar.header("⚙️ Universo CDMX")
+st.sidebar.caption("Universo cerrado: 16 alcaldías de la Ciudad de México. No se incluyen otros estados.")
 
 data_mode = st.sidebar.selectbox(
     "Modo de datos",
@@ -1642,7 +1518,7 @@ seguridad_file = None
 
 if data_mode == "real":
     st.sidebar.markdown("**Archivos reales (plantillas en el paquete)**")
-    secciones_file = st.sidebar.file_uploader("Catálogo secciones (CSV obligatorio)", type=["csv"])
+    secciones_file = st.sidebar.file_uploader("Catálogo territorial (CSV)", type=["csv"])
     shp_file = st.sidebar.file_uploader("SHP / GeoJSON (opcional)", type=["shp", "geojson", "zip"])
     electoral_file = st.sidebar.file_uploader("Resultados electorales (CSV)", type=["csv"])
     socio_file = st.sidebar.file_uploader("Socio / Marginación (CSV opcional)", type=["csv"])
@@ -1679,7 +1555,7 @@ if st.sidebar.button("🧬 Cargar / Generar universo", type="primary"):
     try:
         if data_mode == "real":
             if secciones_file is None:
-                st.sidebar.error("Modo real requiere el CSV de secciones")
+                st.sidebar.error("Modo real requiere el catálogo territorial CSV")
             else:
                 df, adj, meta = provider.load(
                     secciones_csv=secciones_file, shp_path=shp_file,
@@ -1736,25 +1612,25 @@ if st.sidebar.button("♻️ Restaurar universo base"):
         st.success("Universo restaurado")
 
 st.sidebar.markdown("---")
-st.sidebar.subheader("🧠 Broker SAF (tab 5)")
-
-# v5.4: broker location is selected directly on the map.
-
-# v5.4: broker location is selected directly on the map.
-
-# v5.4: broker location is selected directly on the map.
-intencion_b = st.sidebar.selectbox("Intención", ["SIMPATIZANTE", "OPOSITOR", "INDECISO"])
-grado_b = st.sidebar.slider("Grado objetivo", 5, 40, 18)
-capital = st.sidebar.slider("Capital social", 0.0, 1.0, 0.85, 0.05)
-acceso = st.sidebar.slider("Acceso información", 0.0, 1.0, 0.80, 0.05)
-lider = st.sidebar.slider("Liderazgo", 0.0, 1.0, 0.85, 0.05)
-arraigo = st.sidebar.slider("Arraigo", 0.0, 1.0, 0.70, 0.05)
-mov = st.sidebar.slider("Movilización", 0.0, 1.0, 0.75, 0.05)
-desconf = st.sidebar.slider("Desconfianza", 0.0, 1.0, 0.15, 0.05)
-habil = max(0.0, min(1.0, capital * 0.30 + acceso * 0.25 + lider * 0.25 + arraigo * 0.10 + mov * 0.10 - desconf * 0.15))
-st.sidebar.metric("Habilidades SAF", f"{habil:.2f}")
+st.sidebar.subheader("🧠 Broker SAF")
+st.sidebar.caption("Primero selecciona una ubicación en el mapa. Las características del broker aparecen después de la selección.")
 
 df, adj = S["df"], S["adj"]
+
+# Selección persistente desde el mapa para la colocación del broker.
+if "map_selected_territory" not in S:
+    S["map_selected_territory"] = None
+if "map_selected_lat" not in S:
+    S["map_selected_lat"] = None
+if "map_selected_lon" not in S:
+    S["map_selected_lon"] = None
+
+territorio_broker = S.get("map_selected_territory") or (TERRITORIOS[0] if TERRITORIOS else "")
+lat_b = float(S.get("map_selected_lat") or TERRITORIOS_COORDS.get(territorio_broker, (19.35, -99.15))[0])
+lon_b = float(S.get("map_selected_lon") or TERRITORIOS_COORDS.get(territorio_broker, (19.35, -99.15))[1])
+# Defaults internos para funciones que también pueden usar adversario/optimizador.
+intencion_b, grado_b = "SIMPATIZANTE", 18
+capital, acceso, lider, arraigo, mov, desconf = 0.85, 0.80, 0.85, 0.70, 0.75, 0.15
 
 tabs = st.tabs(["1️⃣ Indicadores & SAF", "2️⃣ ABM Dinámica", "3️⃣ 🗺️ Visual Maps",
                 "4️⃣ 🔮 Monte Carlo", "5️⃣ 🧠 Broker & Duelo", "6️⃣ 🕸️ Influencia & Grafo",
@@ -1827,6 +1703,46 @@ with tabs[2]:
         st.info("➡️ Genera el universo primero")
     else:
         st.subheader("Visualización ABM + Campos de Acción Estratégica")
+        st.caption("CDMX únicamente · Alcaldía → UTM → Sección → Manzana · toca/clic el territorio para seleccionarlo")
+
+        # Mapa táctil de selección. PyDeck devuelve el objeto seleccionado cuando
+        # la versión de Streamlit lo soporta; si no, se mantiene el mapa analítico.
+        if HAS_PYDECK:
+            _map_pick = df.copy()
+            _map_pick["_pick_territorio"] = _map_pick["territorial_unit_id"].astype(str)
+            _map_pick["_pick_lat"] = pd.to_numeric(_map_pick["lat"], errors="coerce")
+            _map_pick["_pick_lon"] = pd.to_numeric(_map_pick["lon"], errors="coerce")
+            _map_pick = _map_pick.dropna(subset=["_pick_lat", "_pick_lon"]).copy()
+            _pick_cols = ["_pick_territorio", "_pick_lat", "_pick_lon"]
+            if not _map_pick.empty:
+                _pick_layer = pdk.Layer("ScatterplotLayer", data=_map_pick,
+                    get_position="[_pick_lon, _pick_lat]", get_radius=120,
+                    get_fill_color=[46, 204, 113, 170], pickable=True)
+                try:
+                    _picked = st.pydeck_chart(
+                        pdk.Deck(layers=[_pick_layer],
+                                 initial_view_state=pdk.ViewState(latitude=19.35, longitude=-99.15, zoom=9.5),
+                                 map_style=pdk.map_styles.LIGHT,
+                                 tooltip={"text": "{_pick_territorio}"}),
+                        use_container_width=True,
+                        on_select="rerun", selection_mode="single-object",
+                    )
+                    _sel = getattr(_picked, "selection", None)
+                    _objs = getattr(_sel, "objects", None) if _sel is not None else None
+                    if _objs:
+                        _obj = _objs[0] if isinstance(_objs, list) else _objs
+                        if isinstance(_obj, dict):
+                            S["map_selected_territory"] = str(_obj.get("_pick_territorio", territorio_broker))
+                            S["map_selected_lat"] = float(_obj.get("_pick_lat", lat_b))
+                            S["map_selected_lon"] = float(_obj.get("_pick_lon", lon_b))
+                except TypeError:
+                    st.pydeck_chart(pdk.Deck(layers=[_pick_layer],
+                        initial_view_state=pdk.ViewState(latitude=19.35, longitude=-99.15, zoom=9.5),
+                        map_style=pdk.map_styles.LIGHT), use_container_width=True)
+
+        if S.get("map_selected_territory"):
+            st.success(f"Territorio seleccionado: {S['map_selected_territory']} · {S['map_selected_lat']:.5f}, {S['map_selected_lon']:.5f}")
+
         sub = st.tabs(["🗺️ Mapa real (SAF)", "🎮 Espacio NetLogo-style", "🔥 Calor",
                        "🚚 Rutas", "🌊 Ondas", "🕸️ Red de centros"])
         df_viz = df.copy()
@@ -2045,14 +1961,29 @@ with tabs[4]:
         st.subheader("Broker vs Adversario — simulación de contención")
         cA, cB = st.columns(2)
         with cA:
-            if st.button("🧠 Insertar broker (parámetros del sidebar)"):
-                df2, adj2, bidx = Lab.insertar_broker(
-                    df, {k: list(v) for k, v in adj.items()}, territorio_broker, lat_b, lon_b,
-                    capital, acceso, lider, arraigo, mov, desconf, intencion_b,
-                    grado_objetivo=grado_b, seed=seed, cfg=S["config"])
-                S["df"], S["adj"] = df2, adj2
-                S["broker_ids"].append(df2.loc[bidx, "agent_id"])
-                st.success(f"Broker insertado: {df2.loc[bidx, 'agent_id']} en {territorio_broker}")
+            if not S.get("map_selected_territory"):
+                st.warning("Primero toca/clic un territorio en el mapa, en la pestaña Visual Maps.")
+            else:
+                st.success(f"Ubicación seleccionada: **{territorio_broker}** · {lat_b:.5f}, {lon_b:.5f}")
+                st.markdown("**Características del broker**")
+                intencion_b = st.selectbox("Intención", ["SIMPATIZANTE", "OPOSITOR", "INDECISO"], key="broker_intencion")
+                grado_b = st.slider("Grado objetivo", 5, 40, 18, key="broker_grado")
+                capital = st.slider("Capital social", 0.0, 1.0, 0.85, 0.05, key="broker_capital")
+                acceso = st.slider("Acceso información", 0.0, 1.0, 0.80, 0.05, key="broker_acceso")
+                lider = st.slider("Liderazgo", 0.0, 1.0, 0.85, 0.05, key="broker_lider")
+                arraigo = st.slider("Arraigo", 0.0, 1.0, 0.70, 0.05, key="broker_arraigo")
+                mov = st.slider("Movilización", 0.0, 1.0, 0.75, 0.05, key="broker_mov")
+                desconf = st.slider("Desconfianza", 0.0, 1.0, 0.15, 0.05, key="broker_desconf")
+                habil = max(0.0, min(1.0, capital * 0.30 + acceso * 0.25 + lider * 0.25 + arraigo * 0.10 + mov * 0.10 - desconf * 0.15))
+                st.metric("Habilidades SAF", f"{habil:.2f}")
+                if st.button("🧠 Insertar broker en territorio seleccionado", type="primary"):
+                    df2, adj2, bidx = Lab.insertar_broker(
+                        df, {k: list(v) for k, v in adj.items()}, territorio_broker, lat_b, lon_b,
+                        capital, acceso, lider, arraigo, mov, desconf, intencion_b,
+                        grado_objetivo=grado_b, seed=seed, cfg=S["config"])
+                    S["df"], S["adj"] = df2, adj2
+                    S["broker_ids"].append(df2.loc[bidx, "agent_id"])
+                    st.success(f"Broker insertado: {df2.loc[bidx, 'agent_id']} en {territorio_broker}")
         with cB:
             adv_terr = st.selectbox("Territorio del adversario", TERRITORIOS, key="adv_terr")
             adv_int = st.selectbox("Intención del adversario",
